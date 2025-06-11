@@ -209,26 +209,27 @@ def render():
             for m in active_tab["messages"][:-1]  # Exclude the last assistant message (will be filled)
         ])
         try:
-            stream = ollama.chat(
-                model=active_tab["selected_model"],
-                messages=messages_for_ollama,
-                stream=True,
-                options={
-                    "temperature": st.session_state.temperature,
-                }
-            )
-            full_response = ""
-            assistant_idx = None
-            for idx, message in reversed(list(enumerate(active_tab["messages"]))):
-                if message["role"] == "assistant" and message["content"] == "":
-                    assistant_idx = idx
-                    break
-            # Accumulate the response without rerunning after each chunk
-            if assistant_idx is not None:
-                for chunk in stream:
-                    full_response += chunk['message']['content']
-                # Finalize the response
-                active_tab["messages"][assistant_idx]["content"] = full_response
+            with st.spinner("Thinking..."):
+                stream = ollama.chat(
+                    model=active_tab["selected_model"],
+                    messages=messages_for_ollama,
+                    stream=True,
+                    options={
+                        "temperature": st.session_state.temperature,
+                    }
+                )
+                full_response = ""
+                assistant_idx = None
+                for idx, message in reversed(list(enumerate(active_tab["messages"]))):
+                    if message["role"] == "assistant" and message["content"] == "":
+                        assistant_idx = idx
+                        break
+                # Accumulate the response without rerunning after each chunk
+                if assistant_idx is not None:
+                    for chunk in stream:
+                        full_response += chunk['message']['content']
+                    # Finalize the response
+                    active_tab["messages"][assistant_idx]["content"] = full_response
             st.session_state.streaming_assistant = False
             st.rerun()
         except ollama.ResponseError as e:
