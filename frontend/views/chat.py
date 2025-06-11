@@ -41,6 +41,14 @@ def render():
     if "active_tab_id" not in st.session_state or st.session_state.active_tab_id is None:
         st.session_state.active_tab_id = st.session_state.chat_tabs[0]["id"]
 
+    # --- Ensure session state keys are initialized early ---
+    if "show_upload_expander" not in st.session_state:
+        st.session_state.show_upload_expander = False
+    if "file_uploader_key" not in st.session_state:
+        st.session_state.file_uploader_key = 0
+    if "selected_files" not in st.session_state:
+        st.session_state.selected_files = []
+
     # --- Render the sidebar ---
     with st.sidebar:
         render_sidebar()
@@ -74,57 +82,88 @@ def render():
 
     st.markdown("---")
 
-    # --- Document Upload UI (only when logged in) ---
-    if st.session_state.get("access_token"):
-        with st.expander("📄 Upload Documents", expanded=True):
-            uploaded_files = st.file_uploader(
-                "Select one or more files to upload",
-                type=None,
-                accept_multiple_files=True,
-                key="doc_upload"
-            )
-            upload_btn = st.button("Upload", key="upload_docs_btn")
-            if upload_btn and uploaded_files:
-                with st.spinner("Uploading files..."):
-                    try:
-                        files = []
-                        for f in uploaded_files:
-                            file_bytes = f.read()
-                            files.append(
-                                ("files", (f.name, io.BytesIO(file_bytes), f.type or "application/octet-stream"))
-                            )
-                        resp = requests.post(
-                            f"{BACKEND_URL}/upload_document",
-                            headers=build_auth_headers(),
-                            files=files,
-                            timeout=60
-                        )
-                        if resp.status_code == 200:
-                            st.success(f"Uploaded {len(uploaded_files)} file(s) successfully!")
-                        else:
-                            try:
-                                err = resp.json().get("detail", resp.text)
-                            except Exception:
-                                err = resp.text
-                            st.error(f"Upload failed: {err}")
-                    except requests.exceptions.RequestException as e:
-                        st.error(f"Network error during upload: {e}")
-                    except Exception as e:
-                        st.error(f"Unexpected error: {e}")
+    # --- File Upload Expander at the top (acts as a modal alternative) ---
+    if st.session_state.get("show_upload_expander") and st.session_state.get("access_token"):
+        # Place the upload expander BEFORE the chat input
+        exp_col1, exp_col2 = st.columns([12, 1])
+        with exp_col1:
+            with st.expander("📄 Upload Documents", expanded=True):
+                uploaded_files = st.file_uploader(
+                    "Attach file(s)",
+                    type=None,
+                    accept_multiple_files=True,
+                    key=f"doc_upload_expander_{st.session_state.file_uploader_key}"
+                )
+                if uploaded_files is not None:
+                    st.session_state.selected_files = list(uploaded_files)
+                if st.session_state.get("selected_files"):
+                    unique_files = []
+                    seen_names = set()
+                    for f in st.session_state.selected_files:
+                        if f.name not in seen_names:
+                            unique_files.append(f)
+                            seen_names.add(f.name)
+                    st.session_state.selected_files = unique_files
+                    for idx, f in enumerate(st.session_state.selected_files):
+                        cols = st.columns([6,1])
+                        with cols[0]:
+                            st.markdown(f"- {f.name}")
+                        with cols[1]:
+                            if st.button("✖", key=f"remove_file_expander_{idx}", help="Remove file"):
+                                files = list(st.session_state.selected_files)
+                                files.pop(idx)
+                                st.session_state.selected_files = files
+                                st.session_state.file_uploader_key += 1
+                                if not files:
+                                    st.session_state.selected_files = []
+                                st.rerun()
+        with exp_col2:
+            if st.button("❌", key="close_upload_expander_btn", help="Close file upload"):
+                st.session_state.show_upload_expander = False
 
-    st.markdown("---")
+    # --- Chat input and Plus Button ---
+    col1, col2 = st.columns([10, 1])
+    with col1:
+        prompt = st.chat_input("What's on your mind?", key=f"chat_input_{active_tab['id']}")
+    with col2:
+        plus_clicked = st.button("➕", key="plus_upload_btn", help="Attach document(s)")
+        if plus_clicked:
+            st.session_state.show_upload_expander = True
 
-    # Chat input
-    prompt = st.chat_input("What's on your mind?", key=f"chat_input_{active_tab['id']}")
-
-    # Display chat history
-    for message in active_tab["messages"]:
-        role = message["role"]
-        with st.chat_message(role):
-            st.markdown(message["content"])
-
-    # --- Handle Sending Message ---
+    # --- Upload files if present when sending a message ---
     if prompt:
+        # Upload files if any are selected
+        if st.session_state.get("selected_files") and st.session_state.get("access_token"):
+            with st.spinner("Uploading files..."):
+                try:
+                    files = []
+                    for f in st.session_state.selected_files:
+                        file_bytes = f.read()
+                        files.append(
+                            ("files", (f.name, io.BytesIO(file_bytes), f.type or "application/octet-stream"))
+                        )
+                    resp = requests.post(
+                        f"{BACKEND_URL}/upload_document",
+                        headers=build_auth_headers(),
+                        files=files,
+                        timeout=60
+                    )
+                    if resp.status_code == 200:
+                        st.success(f"Uploaded {len(st.session_state.selected_files)} file(s) successfully!")
+                    else:
+                        try:
+                            err = resp.json().get("detail", resp.text)
+                        except Exception:
+                            err = resp.text
+                        st.error(f"Upload failed: {err}")
+                except requests.exceptions.RequestException as e:
+                    st.error(f"Network error during upload: {e}")
+                except Exception as e:
+                    st.error(f"Unexpected error: {e}")
+            # Clear files and hide uploader after upload
+            st.session_state.selected_files = []
+            st.session_state.show_upload_expander = False
+
         # Add user message first
         active_tab["messages"].append({"role": "user", "content": prompt})
 
