@@ -82,6 +82,18 @@ def render():
 
     st.markdown("---")
 
+    # --- Display chat history above the chat input ---
+    chat_placeholders = []
+    for idx, message in enumerate(active_tab["messages"]):
+        role = message["role"]
+        # Use emoji avatars for compatibility
+        avatar_emoji = "🤖" if role == "assistant" else "🧑" if role == "user" else None
+        with st.chat_message(role, avatar=avatar_emoji):
+            if role == "assistant" and idx == len(active_tab["messages"]) - 1 and st.session_state.get("streaming_assistant"):
+                chat_placeholders.append(st.empty())
+            else:
+                st.markdown(message["content"])
+
     # --- File Upload Expander at the top (acts as a modal alternative) ---
     if st.session_state.get("show_upload_expander") and st.session_state.get("access_token"):
         # Place the upload expander BEFORE the chat input
@@ -169,14 +181,8 @@ def render():
 
         # Generate assistant response and append after user message
         if not active_tab["selected_model"]:
-            with st.chat_message("user"):
-                st.markdown(prompt)
-            with st.chat_message("assistant"):
-                st.error("Cannot generate response: No LLM model is selected or available.")
             active_tab["messages"].append({"role": "assistant", "content": "Cannot generate response: No LLM model is selected or available."})
         else:
-            with st.chat_message("user"):
-                st.markdown(prompt)
             # Prepare messages for ollama (including system and all previous messages)
             messages_for_ollama = []
             if active_tab["system_prompt"].strip():
@@ -185,33 +191,58 @@ def render():
                 {"role": m["role"], "content": m["content"]}
                 for m in active_tab["messages"]
             ])
-            with st.chat_message("assistant"):
-                message_placeholder = st.empty()
-                full_response = ""
-                try:
-                    stream = ollama.chat(
-                        model=active_tab["selected_model"],
-                        messages=messages_for_ollama,
-                        stream=True,
-                        options={
-                            "temperature": st.session_state.temperature,
-                        }
-                    )
-                    for chunk in stream:
-                        full_response += chunk['message']['content']
-                        message_placeholder.markdown(full_response + "▌")
-                    message_placeholder.markdown(full_response)
-                except ollama.ResponseError as e:
-                    error_message = f"Error communicating with Ollama: {e.error}. Please ensure Ollama is running and the model '{active_tab['selected_model']}' is pulled."
-                    st.error(error_message)
-                    full_response = f"I'm sorry, I encountered an error: {e.error}. Please check the server status and ensure the model is downloaded."
-                    message_placeholder.markdown(full_response)
-                except Exception as e:
-                    error_message = f"An unexpected error occurred: {e}"
-                    st.error(error_message)
-                    full_response = "I'm sorry, an unexpected error occurred. Please try again later."
-                    message_placeholder.markdown(full_response)
-            active_tab["messages"].append({"role": "assistant", "content": full_response})
+            # Add a placeholder for the assistant's streaming response
+            active_tab["messages"].append({"role": "assistant", "content": ""})
+            st.session_state.streaming_assistant = True
+            # Rerun to show the placeholder
+            st.rerun()
+
+    # --- Streaming logic (runs after rerun) ---
+    if st.session_state.get("streaming_assistant", False):
+        st.session_state.streaming_assistant = False  # Prevent re-entry on rerun
+        active_tab = get_active_tab()  # Refresh after rerun
+        messages_for_ollama = []
+        if active_tab["system_prompt"].strip():
+            messages_for_ollama.append({"role": "system", "content": active_tab["system_prompt"]})
+        messages_for_ollama.extend([
+            {"role": m["role"], "content": m["content"]}
+            for m in active_tab["messages"][:-1]  # Exclude the last assistant message (will be filled)
+        ])
+        try:
+            stream = ollama.chat(
+                model=active_tab["selected_model"],
+                messages=messages_for_ollama,
+                stream=True,
+                options={
+                    "temperature": st.session_state.temperature,
+                }
+            )
+            full_response = ""
+            assistant_idx = None
+            for idx, message in reversed(list(enumerate(active_tab["messages"]))):
+                if message["role"] == "assistant" and message["content"] == "":
+                    assistant_idx = idx
+                    break
+            # Accumulate the response without rerunning after each chunk
+            if assistant_idx is not None:
+                for chunk in stream:
+                    full_response += chunk['message']['content']
+                # Finalize the response
+                active_tab["messages"][assistant_idx]["content"] = full_response
+            st.session_state.streaming_assistant = False
+            st.rerun()
+        except ollama.ResponseError as e:
+            error_message = f"Error communicating with Ollama: {e.error}. Please ensure Ollama is running and the model '{active_tab['selected_model']}' is pulled."
+            if assistant_idx is not None:
+                active_tab["messages"][assistant_idx]["content"] = error_message
+            st.session_state.streaming_assistant = False
+            st.rerun()
+        except Exception as e:
+            error_message = f"An unexpected error occurred: {e}"
+            if assistant_idx is not None:
+                active_tab["messages"][assistant_idx]["content"] = error_message
+            st.session_state.streaming_assistant = False
+            st.rerun()
 
     # --- Force scroll to top of the page after rerun ---
     st.markdown(
