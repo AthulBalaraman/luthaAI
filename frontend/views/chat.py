@@ -86,11 +86,18 @@ def render():
     chat_placeholders = []
     for idx, message in enumerate(active_tab["messages"]):
         role = message["role"]
-        # Use emoji avatars for compatibility
         avatar_emoji = "🤖" if role == "assistant" else "🧑" if role == "user" else None
         with st.chat_message(role, avatar=avatar_emoji):
-            if role == "assistant" and idx == len(active_tab["messages"]) - 1 and st.session_state.get("streaming_assistant"):
+            # Show a placeholder for the last assistant message if streaming
+            if (
+                role == "assistant"
+                and idx == len(active_tab["messages"]) - 1
+                and message["content"] == ""
+                and st.session_state.get("streaming_assistant")
+            ):
+                # Show "🤖 Thinking..." until streaming starts
                 chat_placeholders.append(st.empty())
+                chat_placeholders[-1].markdown("🤖 Thinking...")
             else:
                 st.markdown(message["content"])
 
@@ -209,27 +216,40 @@ def render():
             for m in active_tab["messages"][:-1]  # Exclude the last assistant message (will be filled)
         ])
         try:
-            with st.spinner("Thinking..."):
-                stream = ollama.chat(
-                    model=active_tab["selected_model"],
-                    messages=messages_for_ollama,
-                    stream=True,
-                    options={
-                        "temperature": st.session_state.temperature,
-                    }
-                )
-                full_response = ""
-                assistant_idx = None
-                for idx, message in reversed(list(enumerate(active_tab["messages"]))):
-                    if message["role"] == "assistant" and message["content"] == "":
-                        assistant_idx = idx
-                        break
-                # Accumulate the response without rerunning after each chunk
-                if assistant_idx is not None:
-                    for chunk in stream:
-                        full_response += chunk['message']['content']
+            stream = ollama.chat(
+                model=active_tab["selected_model"],
+                messages=messages_for_ollama,
+                stream=True,
+                options={
+                    "temperature": st.session_state.temperature,
+                }
+            )
+            full_response = ""
+            assistant_idx = None
+            for idx, message in reversed(list(enumerate(active_tab["messages"]))):
+                if message["role"] == "assistant" and message["content"] == "":
+                    assistant_idx = idx
+                    break
+            # Live update the placeholder as chunks arrive
+            if assistant_idx is not None:
+                # Find the placeholder for the streaming assistant message
+                if len(chat_placeholders) > 0:
+                    placeholder = chat_placeholders[-1]
+                else:
+                    placeholder = st.empty()
+                got_first_chunk = False
+                for chunk in stream:
+                    full_response += chunk['message']['content']
+                    if not got_first_chunk:
+                        got_first_chunk = True
+                    placeholder.markdown(full_response + "▌")
+                if not got_first_chunk:
+                    # If no data was streamed, keep "Thinking..."
+                    placeholder.markdown("🤖 Thinking...")
+                else:
                     # Finalize the response
-                    active_tab["messages"][assistant_idx]["content"] = full_response
+                    placeholder.markdown(full_response)
+                active_tab["messages"][assistant_idx]["content"] = full_response
             st.session_state.streaming_assistant = False
             st.rerun()
         except ollama.ResponseError as e:
