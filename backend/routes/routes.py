@@ -96,12 +96,14 @@ async def send_message_to_chat(
 ):
     """
     Add a message to a chat, only if user owns the chat.
+    Accepts both user and assistant messages.
     """
     chat = db.query(models.Chat).filter(models.Chat.id == chat_id, models.Chat.user_id == current_user.id).first()
     if not chat:
         raise HTTPException(status_code=403, detail="Not authorized for this chat.")
     from backend.models import Message
-    msg = Message(chat_id=chat_id, role="user", content=data.get("content", ""))
+    role = data.get("role", "user")
+    msg = Message(chat_id=chat_id, role=role, content=data.get("content", ""))
     db.add(msg)
     db.commit()
     db.refresh(msg)

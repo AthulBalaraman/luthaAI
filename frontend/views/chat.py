@@ -196,14 +196,27 @@ def render():
     st.markdown(f"Welcome back, **{st.session_state.username}**! This application allows you to interact with Large Language Models (LLMs) running entirely on your local machine using Ollama.")
 
     # --- Display chat history (paginated) ---
-    chat_history = st.session_state.local_chat_history.get(st.session_state.active_chat_id, []) if "local_chat_history" in st.session_state else []
-    # Prepare placeholders for streaming assistant message
+    # Ensure chat history is initialized from backend messages on first load or after refresh
+    if "local_chat_history" not in st.session_state:
+        st.session_state.local_chat_history = {}
+
+    # Always sync local_chat_history with backend messages if:
+    # - The chat_id is not in local_chat_history
+    # - OR the local_chat_history for this chat is empty (e.g., after refresh)
+    if (
+        st.session_state.active_chat_id not in st.session_state.local_chat_history
+        or not st.session_state.local_chat_history[st.session_state.active_chat_id]
+    ):
+        st.session_state.local_chat_history[st.session_state.active_chat_id] = [
+            {"role": m["role"], "content": m["content"]} for m in messages
+        ]
+
+    chat_history = st.session_state.local_chat_history.get(st.session_state.active_chat_id, [])
     chat_placeholders = []
     for idx, message in enumerate(chat_history):
         role = message["role"]
         avatar_emoji = "🤖" if role == "assistant" else "🧑" if role == "user" else None
         with st.chat_message(role, avatar=avatar_emoji):
-            # Show a placeholder for the last assistant message if streaming
             if (
                 role == "assistant"
                 and idx == len(chat_history) - 1
@@ -323,6 +336,7 @@ def render():
             else:
                 placeholder.markdown(full_response)
             st.session_state.local_chat_history[st.session_state.active_chat_id][assistant_idx]["content"] = full_response
+            save_assistant_message(st.session_state.active_chat_id, full_response)
             st.rerun()
         except ollama.ResponseError as e:
             error_message = f"Error communicating with Ollama: {e.error}. Please ensure Ollama is running and the model '{st.session_state.selected_model}' is pulled."
@@ -334,3 +348,14 @@ def render():
             st.session_state.local_chat_history[st.session_state.active_chat_id][assistant_idx]["content"] = error_message
             st.error(error_message)
             st.rerun()
+
+def save_assistant_message(chat_id, content):
+    try:
+        resp = requests.post(
+            f"{BACKEND_URL}/chat/{chat_id}/send_message",
+            headers=build_auth_headers(),
+            json={"content": content, "role": "assistant"}
+        )
+        return resp.status_code == 201
+    except Exception:
+        return False
