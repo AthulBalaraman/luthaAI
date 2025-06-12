@@ -124,6 +124,11 @@ def render():
 
     # --- Select chat_id (thread) ---
     chat_ids = [c["chat_id"] for c in user_chats]
+    if not chat_ids:
+        st.session_state.active_chat_id = None
+        st.session_state.chat_page = 1
+        st.info("No chats available. Create a new chat to get started.")
+        return  # Stop rendering further
     if "active_chat_id" not in st.session_state or st.session_state.active_chat_id not in chat_ids:
         st.session_state.active_chat_id = chat_ids[0]
         st.session_state.chat_page = 1
