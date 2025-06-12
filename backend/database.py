@@ -31,3 +31,11 @@ def get_db():
         yield db # Provide the session to the calling function
     finally:
         db.close() # Ensure the session is closed after the request is processed
+
+# Ensure all tables are created (including Chat and Message)
+def init_db():
+    Base.metadata.create_all(bind=engine)
+
+# At the bottom of the file, for manual creation (optional):
+if __name__ == "__main__":
+    Base.metadata.create_all(bind=engine)

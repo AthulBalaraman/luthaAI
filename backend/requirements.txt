@@ -11,3 +11,5 @@ PyJWT
 pdfplumber
 python-docx
 requests
+python-multipart
+pymysql

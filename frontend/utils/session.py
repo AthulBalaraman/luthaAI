@@ -4,7 +4,7 @@ import requests
 BACKEND_URL = "http://127.0.0.1:8000"
 
 def restore_session_from_query_params():
-    # Use st.query_params instead of st.experimental_get_query_params
+    # Only store access_token, username, logged_in in session state
     token = st.query_params.get("access_token", None)
     if token and not st.session_state.get("access_token"):
         st.session_state.access_token = token
@@ -20,9 +20,9 @@ def restore_session_from_query_params():
                 st.session_state.access_token = None
                 st.session_state.logged_in = False
                 st.session_state.username = None
-                st.query_params.clear()  # Clear token from URL if invalid
+                st.query_params.clear()
         except Exception:
             st.session_state.access_token = None
             st.session_state.logged_in = False
             st.session_state.username = None
-            st.query_params.clear()  # Clear token from URL if error
+            st.query_params.clear()
