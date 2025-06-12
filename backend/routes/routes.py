@@ -114,6 +114,22 @@ async def send_message_to_chat(
     db.add(msg)
     db.commit()
     db.refresh(msg)
+
+    # Update chat name if this is the first user message and chat name is still "New Chat"
+    if role == "user" and chat.name == "New Chat":
+        user_msg_count = db.query(models.Message).filter(
+            models.Message.chat_id == chat_id,
+            models.Message.role == "user"
+        ).count()
+        if user_msg_count == 1:
+            first_chars = data.get("content", "")[:10]
+            if len(data.get("content", "")) > 10:
+                first_chars += "..."
+            chat.name = first_chars
+            db.add(chat)
+            db.commit()
+            db.refresh(chat)
+
     return {"message_id": msg.id}
 
 @router.delete("/chat/{chat_id}/delete", status_code=204)

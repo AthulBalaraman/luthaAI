@@ -215,6 +215,7 @@ def render():
                 "role": "assistant", 
                 "content": ""
             })
+            # Refresh to update sidebar chat names
             st.rerun()
         else:
             st.error("Failed to save message. Please try again.")
