@@ -115,3 +115,20 @@ async def send_message_to_chat(
     db.commit()
     db.refresh(msg)
     return {"message_id": msg.id}
+
+@router.delete("/chat/{chat_id}/delete", status_code=204)
+async def delete_chat(
+    chat_id: int,
+    current_user: User = Depends(get_current_user_controller),
+    db: Session = Depends(get_db)
+):
+    """
+    Delete a chat and all its messages, only if user owns the chat.
+    """
+    chat = db.query(models.Chat).filter(models.Chat.id == chat_id, models.Chat.user_id == current_user.id).first()
+    if not chat:
+        raise HTTPException(status_code=403, detail="Not authorized for this chat.")
+    db.query(models.Message).filter(models.Message.chat_id == chat_id).delete()
+    db.delete(chat)
+    db.commit()
+    return

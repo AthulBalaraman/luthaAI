@@ -1,6 +1,20 @@
 import streamlit as st
 from utils.auth import logout_user
 from utils.ollama_utils import get_ollama_models
+import requests
+
+def delete_chat_backend(chat_id):
+    # Changed import to relative to avoid ModuleNotFoundError
+    from views.chat import build_auth_headers
+    BACKEND_URL = "http://127.0.0.1:8000"
+    try:
+        resp = requests.delete(
+            f"{BACKEND_URL}/chat/{chat_id}/delete",
+            headers=build_auth_headers()
+        )
+        return resp.status_code == 204
+    except Exception:
+        return False
 
 def render_sidebar(user_chats=None):
     # Inject CSS for flexbox sidebar layout and hide Streamlit's default sidebar header
@@ -72,14 +86,30 @@ def render_sidebar(user_chats=None):
         if user_chats:
             st.markdown("### Recent Chats")
             for chat in user_chats:
-                if st.button(
-                    f"💭 {chat['name']}", 
-                    key=f"chat_{chat['chat_id']}",
-                    use_container_width=True,
-                ):
-                    st.session_state.active_chat_id = chat['chat_id']
-                    st.session_state.chat_page = 1
-                    st.rerun()
+                chat_cols = st.columns([8, 1], gap="small")
+                with chat_cols[0]:
+                    if st.button(
+                        f"💭 {chat['name']}",
+                        key=f"chat_{chat['chat_id']}",
+                        use_container_width=True,
+                    ):
+                        st.session_state.active_chat_id = chat['chat_id']
+                        st.session_state.chat_page = 1
+                        st.rerun()
+                with chat_cols[1]:
+                    if st.button("🗑️", key=f"delete_chat_{chat['chat_id']}", help="Delete chat", use_container_width=True):
+                        if delete_chat_backend(chat['chat_id']):
+                            # Remove from session state if active
+                            if st.session_state.get("active_chat_id") == chat['chat_id']:
+                                # Try to select another chat if available
+                                remaining_chats = [c for c in user_chats if c["chat_id"] != chat["chat_id"]]
+                                if remaining_chats:
+                                    st.session_state.active_chat_id = remaining_chats[0]["chat_id"]
+                                else:
+                                    st.session_state.active_chat_id = None
+                            st.rerun()
+                        else:
+                            st.error("Failed to delete chat.")
         
         for tab in st.session_state.chat_tabs:
             is_active = (tab["id"] == st.session_state.active_tab_id)
