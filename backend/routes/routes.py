@@ -11,7 +11,7 @@ from backend.controllers.user_controller import (
     get_current_user_controller,
 )
 from backend.controllers.document_controller import upload_document_controller
-from backend.models import User
+from backend.models import User, Chat, Message  # Add Chat model import
 from backend import models  # <-- Add this import at the top
 
 router = APIRouter()
@@ -44,17 +44,24 @@ async def get_user_chats(current_user: User = Depends(get_current_user_controlle
     chats = db.query(models.Chat).filter(models.Chat.user_id == current_user.id).all()
     return {"chats": [{"chat_id": c.id, "name": c.name} for c in chats]}
 
-@router.post("/create_chat", status_code=status.HTTP_201_CREATED)
+@router.post("/create_chat", status_code=201)
 async def create_chat(current_user: User = Depends(get_current_user_controller), db: Session = Depends(get_db)):
-    """
-    Create a new chat thread for the user.
-    """
-    from backend.models import Chat
-    chat = Chat(user_id=current_user.id, name="New Chat")
-    db.add(chat)
-    db.commit()
-    db.refresh(chat)
-    return {"chat_id": chat.id}
+    """Create a new chat thread for the user."""
+    try:
+        print(f"[DEBUG] Creating new chat for user: {current_user.id}")
+        chat = Chat(user_id=current_user.id, name="New Chat")  # Now Chat is imported
+        db.add(chat)
+        db.commit()  # Ensure the chat is committed
+        db.refresh(chat)
+        print(f"[DEBUG] Created chat with ID: {chat.id}")
+        return {"chat_id": chat.id}
+    except Exception as e:
+        print(f"[ERROR] Failed to create chat: {e}")
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
 
 @router.get("/chat/{chat_id}/messages")
 async def get_chat_messages(

@@ -3,6 +3,7 @@ import ollama
 import io
 import requests
 from components.sidebar import render_sidebar
+from components.chat_header import render_chat_header
 
 BACKEND_URL = "http://127.0.0.1:8000"
 
@@ -55,19 +56,19 @@ def fetch_chat_messages(chat_id, page=1, per_page=MESSAGES_PER_PAGE):
         return [], 1
 
 def create_new_chat():
-    """
-    Create a new chat thread for the user via backend.
-    If creation fails, do not show an error in the UI—just return None.
-    """
+    """Create a new chat thread."""
     try:
         resp = requests.post(f"{BACKEND_URL}/create_chat", headers=build_auth_headers())
         if resp.status_code == 201:
-            return resp.json().get("chat_id")
-        else:
-            # Do not show error in UI, just return None
-            return None
-    except Exception:
-        # Do not show error in UI, just return None
+            chat_id = resp.json().get("chat_id")
+            # Initialize empty history for new chat but don't clear others
+            if "local_chat_history" not in st.session_state:
+                st.session_state.local_chat_history = {}
+            st.session_state.local_chat_history[chat_id] = []
+            return chat_id
+        return None
+    except Exception as e:
+        print(f"[ERROR] Failed to create chat: {e}")
         return None
 
 def fetch_ollama_models():
@@ -80,36 +81,46 @@ def fetch_ollama_models():
     except Exception:
         return []
 
+def save_user_message(chat_id, content):
+    """Save user message to backend immediately when sent."""
+    try:
+        resp = requests.post(
+            f"{BACKEND_URL}/chat/{chat_id}/send_message",
+            headers=build_auth_headers(),
+            json={"content": content, "role": "user"}
+        )
+        return resp.status_code == 201
+    except Exception:
+        return False
+
 def render():
-    # --- Ensure user is logged in and has a valid access token ---
+    # --- Ensure user is logged in ---
     if not st.session_state.get("logged_in") or not st.session_state.get("access_token"):
         st.error("You must be logged in to access chats.")
-        st.stop()  # Stop execution if not authenticated
+        st.stop()
 
-    # --- Always render sidebar first ---
-    with st.sidebar:
-        render_sidebar()
-        # (No extra "Create New Chat" button here)
-
-    # --- Load user's chat threads from backend ---
+    # --- Load user's chat threads from backend first ---
     user_chats = fetch_user_chats()
     has_chats = bool(user_chats)
 
-    # --- If no chats, try to create one automatically (ChatGPT-like experience) ---
-    if not has_chats:
+    # --- Now render sidebar with loaded chats ---
+    with st.sidebar:
+        render_sidebar(user_chats)
+
+    # --- Render chat header ---
+    render_chat_header()
+
+    # --- Handle new chat creation ---
+    if st.session_state.get("create_new_chat"):
         new_chat_id = create_new_chat()
         if new_chat_id:
-            user_chats = [{"chat_id": new_chat_id, "name": "New Chat"}]
+            # Add new chat to existing chats list
+            user_chats.append({"chat_id": new_chat_id, "name": "New Chat"})
             st.session_state.active_chat_id = new_chat_id
             st.session_state.chat_page = 1
-            has_chats = True
-        else:
-            st.title("💡 LuthaMind AI: Your Private AI Companion")
-            st.markdown(f"Welcome back, **{st.session_state.username}**! This application allows you to interact with Large Language Models (LLMs) running entirely on your local machine using Ollama.")
-            st.markdown("---")
-            st.write("Once you create a chat, your conversation will appear here.")
-            st.chat_input("Create a chat to start messaging...", disabled=True)
-            return
+            st.session_state.create_new_chat = False
+            st.session_state.local_chat_history = {new_chat_id: []}
+            st.rerun()
 
     # --- Select chat_id (thread) ---
     chat_ids = [c["chat_id"] for c in user_chats]
@@ -123,89 +134,28 @@ def render():
 
     # --- Fetch paginated messages for selected chat ---
     if st.session_state.active_chat_id and st.session_state.active_chat_id in chat_ids:
-        messages, total_pages = fetch_chat_messages(st.session_state.active_chat_id, st.session_state.chat_page, MESSAGES_PER_PAGE)
+        messages, total_pages = fetch_chat_messages(
+            st.session_state.active_chat_id,
+            st.session_state.chat_page,
+            MESSAGES_PER_PAGE,
+        )
     else:
         messages, total_pages = [], 1
 
-    # --- Model selection (Ollama) ---
-    if "ollama_models" not in st.session_state:
-        st.session_state.ollama_models = fetch_ollama_models()
-    if "selected_model" not in st.session_state or st.session_state.selected_model not in st.session_state.ollama_models:
-        st.session_state.selected_model = st.session_state.ollama_models[0] if st.session_state.ollama_models else "llama3"
-
-    st.markdown("#### Model Selection")
-    if st.session_state.ollama_models:
-        st.session_state.selected_model = st.selectbox(
-            "Choose Ollama Model",
-            st.session_state.ollama_models,
-            index=st.session_state.ollama_models.index(st.session_state.selected_model) if st.session_state.selected_model in st.session_state.ollama_models else 0,
-            key="ollama_model_select",
-            help="Select the language model to use for this chat."
-        )
-    else:
-        st.warning("No Ollama models found. Please ensure Ollama is running and models are pulled.")
-
-    # --- File Upload Expander (preserved) ---
-    if "show_upload_expander" not in st.session_state:
-        st.session_state.show_upload_expander = False
-    if "file_uploader_key" not in st.session_state:
-        st.session_state.file_uploader_key = 0
-    if "selected_files" not in st.session_state:
-        st.session_state.selected_files = []
-
-    # Upload expander at the top (acts as a modal alternative)
-    if st.session_state.get("show_upload_expander") and st.session_state.get("access_token"):
-        exp_col1, exp_col2 = st.columns([12, 1])
-        with exp_col1:
-            with st.expander("📄 Upload Documents", expanded=True):
-                uploaded_files = st.file_uploader(
-                    "Attach file(s)",
-                    type=None,
-                    accept_multiple_files=True,
-                    key=f"doc_upload_expander_{st.session_state.file_uploader_key}"
-                )
-                if uploaded_files is not None:
-                    st.session_state.selected_files = list(uploaded_files)
-                if st.session_state.get("selected_files"):
-                    unique_files = []
-                    seen_names = set()
-                    for f in st.session_state.selected_files:
-                        if f.name not in seen_names:
-                            unique_files.append(f)
-                            seen_names.add(f.name)
-                    st.session_state.selected_files = unique_files
-                    for idx, f in enumerate(st.session_state.selected_files):
-                        cols = st.columns([6,1])
-                        with cols[0]:
-                            st.markdown(f"- {f.name}")
-                        with cols[1]:
-                            if st.button("✖", key=f"remove_file_expander_{idx}", help="Remove file"):
-                                files = list(st.session_state.selected_files)
-                                files.pop(idx)
-                                st.session_state.selected_files = files
-                                st.session_state.file_uploader_key += 1
-                                if not files:
-                                    st.session_state.selected_files = []
-                                st.rerun()
-        with exp_col2:
-            if st.button("❌", key="close_upload_expander_btn", help="Close file upload"):
-                st.session_state.show_upload_expander = False
-
-    # --- Main Chat Area ---
-    st.title("💡 LuthaMind AI: Your Private AI Companion")
-    st.markdown(f"Welcome back, **{st.session_state.username}**! This application allows you to interact with Large Language Models (LLMs) running entirely on your local machine using Ollama.")
-
-    # --- Display chat history (paginated) ---
-    # Ensure chat history is initialized from backend messages on first load or after refresh
+    # --- Ensure chat history is initialized from backend messages on first load or after refresh ---
     if "local_chat_history" not in st.session_state:
         st.session_state.local_chat_history = {}
 
-    # Always sync local_chat_history with backend messages if:
+    # Only sync local_chat_history with backend messages if:
     # - The chat_id is not in local_chat_history
     # - OR the local_chat_history for this chat is empty (e.g., after refresh)
+    # - AND only if this is not a newly created chat (which should be empty)
     if (
         st.session_state.active_chat_id not in st.session_state.local_chat_history
-        or not st.session_state.local_chat_history[st.session_state.active_chat_id]
+        or (
+            not st.session_state.local_chat_history[st.session_state.active_chat_id]
+            and messages  # Only sync if there are messages in backend
+        )
     ):
         st.session_state.local_chat_history[st.session_state.active_chat_id] = [
             {"role": m["role"], "content": m["content"]} for m in messages
@@ -227,7 +177,7 @@ def render():
             else:
                 st.markdown(message["content"])
 
-    # --- Chat input and response generation ---
+    # --- Chat input first ---
     col1, col2 = st.columns([10, 1])
     with col1:
         chat_prompt = st.chat_input(
@@ -240,59 +190,34 @@ def render():
         if plus_clicked:
             st.session_state.show_upload_expander = True
 
-    # --- Upload files if present when sending a message ---
+    # --- Handle message sending and streaming ---
     if chat_prompt and st.session_state.active_chat_id and st.session_state.active_chat_id in chat_ids:
-        # Upload files if any are selected
-        if st.session_state.get("selected_files") and st.session_state.get("access_token"):
-            with st.spinner("Uploading files..."):
-                try:
-                    files = []
-                    for f in st.session_state.selected_files:
-                        file_bytes = f.read()
-                        files.append(
-                            ("files", (f.name, io.BytesIO(file_bytes), f.type or "application/octet-stream"))
-                        )
-                    resp = requests.post(
-                        f"{BACKEND_URL}/upload_document",
-                        headers=build_auth_headers(),
-                        files=files,
-                        timeout=60
-                    )
-                    if resp.status_code == 200:
-                        st.success(f"Uploaded {len(st.session_state.selected_files)} file(s) successfully!")
-                    else:
-                        try:
-                            err = resp.json().get("detail", resp.text)
-                        except Exception:
-                            err = resp.text
-                        st.error(f"Upload failed: {err}")
-                except requests.exceptions.RequestException as e:
-                    st.error(f"Network error during upload: {e}")
-                except Exception as e:
-                    st.error(f"Unexpected error: {e}")
-            # Clear files and hide uploader after upload
-            st.session_state.selected_files = []
-            st.session_state.show_upload_expander = False
+        # Save user message to backend immediately
+        if save_user_message(st.session_state.active_chat_id, chat_prompt):
+            # Add to local history only after successful backend save
+            if "local_chat_history" not in st.session_state:
+                st.session_state.local_chat_history = {}
+            if st.session_state.active_chat_id not in st.session_state.local_chat_history:
+                st.session_state.local_chat_history[st.session_state.active_chat_id] = []
+            st.session_state.local_chat_history[st.session_state.active_chat_id].append({
+                "role": "user", 
+                "content": chat_prompt
+            })
 
-        # Add user message to chat history (local, for streaming)
-        if "local_chat_history" not in st.session_state:
-            st.session_state.local_chat_history = {}
-        if st.session_state.active_chat_id not in st.session_state.local_chat_history:
-            st.session_state.local_chat_history[st.session_state.active_chat_id] = []
-        st.session_state.local_chat_history[st.session_state.active_chat_id].append({"role": "user", "content": chat_prompt})
+            # Prepare for assistant response
+            messages_for_ollama = []
+            system_prompt = "You are a helpful AI assistant."
+            messages_for_ollama.append({"role": "system", "content": system_prompt})
+            messages_for_ollama.extend(st.session_state.local_chat_history[st.session_state.active_chat_id])
 
-        # Prepare messages for ollama (system + history)
-        messages_for_ollama = []
-        system_prompt = "You are a helpful AI assistant."
-        messages_for_ollama.append({"role": "system", "content": system_prompt})
-        messages_for_ollama.extend(st.session_state.local_chat_history[st.session_state.active_chat_id])
-
-        # Add a placeholder for the assistant's streaming response
-        st.session_state.local_chat_history[st.session_state.active_chat_id].append({"role": "assistant", "content": ""})
-        assistant_idx = len(st.session_state.local_chat_history[st.session_state.active_chat_id]) - 1
-
-        # Rerun to show the "Thinking..." placeholder in the chat history (above the input)
-        st.rerun()
+            # Add placeholder for assistant response
+            st.session_state.local_chat_history[st.session_state.active_chat_id].append({
+                "role": "assistant", 
+                "content": ""
+            })
+            st.rerun()
+        else:
+            st.error("Failed to save message. Please try again.")
 
     # --- Streaming logic (runs after rerun) ---
     # If the last message is an assistant with empty content, stream the response

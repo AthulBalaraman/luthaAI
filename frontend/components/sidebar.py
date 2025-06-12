@@ -2,7 +2,7 @@ import streamlit as st
 from utils.auth import logout_user
 from utils.ollama_utils import get_ollama_models
 
-def render_sidebar():
+def render_sidebar(user_chats=None):
     # Inject CSS for flexbox sidebar layout and hide Streamlit's default sidebar header
     st.markdown(
         """
@@ -49,26 +49,38 @@ def render_sidebar():
         st.markdown('<div class="sidebar-content">', unsafe_allow_html=True)
         st.header("Your Chats")
         
-        # Model Selection in Sidebar (Moved to top)
-        available_models = st.session_state.ollama_models
-        active_tab = get_active_tab()
-        if available_models and active_tab:
-            model_index = available_models.index(active_tab["selected_model"]) if active_tab["selected_model"] in available_models else 0
-            selected_model = st.selectbox(
-                "Choose a model",
-                available_models,
-                index=model_index,
-                key=f"model_select_{active_tab['id']}",
-                help="Select the language model to use for this chat."
+        # --- Model Selection ---
+        st.markdown("### Model")
+        if "ollama_models" in st.session_state and st.session_state.ollama_models:
+            st.session_state.selected_model = st.selectbox(
+                "Choose Model",
+                st.session_state.ollama_models,
+                index=st.session_state.ollama_models.index(st.session_state.selected_model) 
+                if st.session_state.selected_model in st.session_state.ollama_models else 0
             )
-            if selected_model != active_tab["selected_model"]:
-                active_tab["selected_model"] = selected_model
-        elif not available_models:
-            st.warning("No Ollama models found. Please ensure Ollama is running and models are pulled.")
-        # st.markdown("---")
-        if st.button("➕ Create New Chat", key="new_tab_button"):
-            create_new_tab()
+        
+        st.markdown("---")
+        st.markdown("### Chat Actions")
+        
+        # New Chat button
+        if st.button("➕ New Chat"):
+            # Don't clear existing chat until new one is created
+            st.session_state.create_new_chat = True
             st.rerun()
+        
+        # Only show chat list if we have chats
+        if user_chats:
+            st.markdown("### Recent Chats")
+            for chat in user_chats:
+                if st.button(
+                    f"💭 {chat['name']}", 
+                    key=f"chat_{chat['chat_id']}",
+                    use_container_width=True,
+                ):
+                    st.session_state.active_chat_id = chat['chat_id']
+                    st.session_state.chat_page = 1
+                    st.rerun()
+        
         for tab in st.session_state.chat_tabs:
             is_active = (tab["id"] == st.session_state.active_tab_id)
             tab_cols = st.columns([7, 1, 1], gap="small")
