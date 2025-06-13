@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, status, UploadFile, File, HTTPException
+import os
 from typing import List
 from sqlalchemy.orm import Session
 from fastapi.security import OAuth2PasswordRequestForm
@@ -148,3 +149,44 @@ async def delete_chat(
     db.delete(chat)
     db.commit()
     return
+
+@router.post("/chat/{chat_id}/upload")
+async def upload_chat_file(
+    chat_id: int,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user_controller),
+    db: Session = Depends(get_db)
+):
+    """Upload a file in the context of a chat conversation."""
+    # Verify chat ownership
+    chat = db.query(models.Chat).filter(models.Chat.id == chat_id, models.Chat.user_id == current_user.id).first()
+    if not chat:
+        raise HTTPException(status_code=403, detail="Not authorized for this chat.")
+
+    # Create uploads directory if it doesn't exist (changed path here)
+    upload_dir = "uploads"  # Changed this line to use relative path
+    os.makedirs(upload_dir, exist_ok=True)
+
+    # Create a unique filename
+    file_ext = os.path.splitext(file.filename)[1]
+    unique_filename = f"chat_{chat_id}_{file.filename}"
+    file_path = os.path.join(upload_dir, unique_filename)
+
+    # Save the file
+    try:
+        contents = await file.read()
+        with open(file_path, "wb") as f:
+            f.write(contents)
+        
+        # Create a message in the chat about the uploaded file
+        file_message = Message(
+            chat_id=chat_id,
+            role="user",
+            content=f"📎 Uploaded file: {file.filename}"
+        )
+        db.add(file_message)
+        db.commit()
+        
+        return {"filename": unique_filename, "message": "File uploaded successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

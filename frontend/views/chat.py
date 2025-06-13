@@ -93,6 +93,20 @@ def save_user_message(chat_id, content):
     except Exception:
         return False
 
+def upload_file_to_chat(chat_id, file):
+    """Upload a file to the current chat conversation."""
+    try:
+        files = {"file": (file.name, file, "multipart/form-data")}
+        response = requests.post(
+            f"{BACKEND_URL}/chat/{chat_id}/upload",
+            headers=build_auth_headers(),
+            files=files
+        )
+        return response.status_code == 200
+    except Exception as e:
+        st.error(f"Error uploading file: {e}")
+        return False
+
 def render():
     # --- Ensure user is logged in ---
     if not st.session_state.get("logged_in") or not st.session_state.get("access_token"):
@@ -198,10 +212,17 @@ def render():
     if st.session_state.get("show_upload_expander"):
         with st.expander("Upload Documents"):
             uploaded_files = st.file_uploader("Choose a file", accept_multiple_files=True)
-            if uploaded_files:
-                for uploaded_file in uploaded_files:
-                    print(f"Uploaded file: {uploaded_file.name}")
-
+            col1, col2 = st.columns([6,1])
+            with col2:
+                if st.button("Upload", disabled=not uploaded_files):
+                    for uploaded_file in uploaded_files:
+                        if upload_file_to_chat(st.session_state.active_chat_id, uploaded_file):
+                            st.success(f"Uploaded {uploaded_file.name}")
+                        else:
+                            st.error(f"Failed to upload {uploaded_file.name}")
+                    st.session_state.show_upload_expander = False
+                    st.rerun()
+    
     # --- Handle message sending and streaming ---
     if chat_prompt and st.session_state.active_chat_id and st.session_state.active_chat_id in chat_ids:
         # Save user message to backend immediately
