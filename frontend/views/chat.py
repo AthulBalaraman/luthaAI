@@ -102,7 +102,11 @@ def upload_file_to_chat(chat_id, file):
             headers=build_auth_headers(),
             files=files
         )
-        return response.status_code == 200
+        if response.status_code == 200:
+            # The backend now handles adding both the file upload message
+            # and the summary message to the chat history
+            return True
+        return False
     except Exception as e:
         st.error(f"Error uploading file: {e}")
         return False

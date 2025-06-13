@@ -1,6 +1,7 @@
 import streamlit as st
 import requests
 import json
+from requests.exceptions import ConnectionError
 
 BACKEND_URL = "http://127.0.0.1:8000"
 
@@ -18,6 +19,10 @@ def render():
         submitted = st.form_submit_button("Log In")
         
         if submitted:
+            if not username or not password:
+                st.error("Please enter both username and password")
+                return
+
             try:
                 # Create form data
                 data = {
@@ -31,25 +36,36 @@ def render():
                 response = requests.post(
                     f"{BACKEND_URL}/token",
                     data=data,  # Use data instead of json for form submission
-                    headers={"Content-Type": "application/x-www-form-urlencoded"}
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                    timeout=10  # Add timeout
                 )
                 
                 print(f"[DEBUG] Login response status: {response.status_code}")
+                print(f"[DEBUG] Response content: {response.text}")
                 
                 if response.status_code == 200:
                     token_data = response.json()
                     st.session_state.access_token = token_data["access_token"]
-                    st.session_state.logged_in = True
+                    st.session_state.logged_in = True 
                     print("[DEBUG] Login successful")
                     st.success("Login successful!")
                     st.rerun()
+                elif response.status_code == 401:
+                    st.error("Invalid username or password")
+                elif response.status_code == 422:
+                    st.error("Invalid input format")
                 else:
-                    print(f"[DEBUG] Login failed: {response.text}")
-                    st.error("Login failed. Please check your credentials.")
+                    st.error(f"Login failed (Status {response.status_code}). Please try again.")
                     
+            except ConnectionError:
+                print("[DEBUG] Connection error - backend server may be down")
+                st.error("Cannot connect to server. Please check if the backend server is running.")
+            except requests.Timeout:
+                print("[DEBUG] Request timed out")
+                st.error("Request timed out. Please try again.")
             except Exception as e:
                 print(f"[DEBUG] Login error: {str(e)}")
-                st.error(f"An error occurred: {str(e)}")
+                st.error("An unexpected error occurred. Please try again later.")
 
     # Signup redirect
     if st.button("Create an account"):

@@ -13,3 +13,5 @@ python-docx
 requests
 python-multipart
 pymysql
+transformers
+torch

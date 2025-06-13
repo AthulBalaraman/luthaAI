@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends, status, UploadFile, File, HTTPException
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm  # Add this import
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI
 import os
 from typing import List
 import pdfplumber
@@ -17,8 +19,17 @@ from backend.controllers.user_controller import (
 from backend.controllers.document_controller import upload_document_controller
 from backend.models import User, Chat, Message  # Add Chat model import
 from backend import models  # <-- Add this import at the top
+from backend.utils.summarizer import get_text_summary
 
 router = APIRouter()
+app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:8501"],  # Streamlit default port
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @router.post("/signup", response_model=Token, status_code=status.HTTP_201_CREATED)
 async def signup(user: UserCreate, db: Session = Depends(get_db)):
@@ -26,7 +37,18 @@ async def signup(user: UserCreate, db: Session = Depends(get_db)):
 
 @router.post("/token", response_model=Token)
 async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    return await login_controller(form_data, db)
+    print(f"[DEBUG] Login attempt for user: {form_data.username}")
+    try:
+        result = await login_controller(form_data, db)
+        print(f"[DEBUG] Login successful for user: {form_data.username}")
+        return result
+    except Exception as e:
+        print(f"[DEBUG] Login failed for user {form_data.username}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
 @router.get("/current_user")
 async def read_current_user(current_user: User = Depends(get_current_user_controller)):
@@ -239,7 +261,7 @@ async def upload_chat_file(
         '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         '.txt': 'text/plain'
     }
-    content_type = content_type_map.get(file_ext)
+    content_type = content_type_map.get(file_ext) 
     
     if not content_type:
         raise HTTPException(status_code=422, detail=f"Unsupported file type: {file_ext}")
@@ -264,16 +286,37 @@ async def upload_chat_file(
         print(extracted_text)
         print("=" * 50)
         
-        # Create a message in the chat about the uploaded file
+        # Generate summary of the extracted text with error handling
+        try:
+            if not extracted_text or len(extracted_text.strip()) == 0:
+                summary = "The file appears to be empty or could not be processed."
+            else:
+                print(f"[DEBUG] Attempting to summarize text of length: {len(extracted_text)}")
+                summary = get_text_summary(extracted_text)
+                if not summary:
+                    summary = "Could not generate summary. The text might be too short or in an unsupported format."
+        except Exception as e:
+            print(f"[ERROR] Summarization error: {str(e)}")
+            summary = "An error occurred while generating the summary."
+        
+        # Create a message for the file upload
         file_message = Message(
             chat_id=chat_id,
             role="user",
             content=f"📎 Uploaded file: {file.filename}"
         )
         db.add(file_message)
+
+        # Create a message for the summary
+        summary_message = Message(
+            chat_id=chat_id,
+            role="assistant",
+            content=f"Here's a summary of {file.filename}:\n\n{summary}"
+        )
+        db.add(summary_message)
         db.commit()
         
-        return {"filename": unique_filename, "message": "File uploaded successfully"}
+        return {"filename": unique_filename, "summary": summary}
     except Exception as e:
         if os.path.exists(file_path):
             os.remove(file_path)
