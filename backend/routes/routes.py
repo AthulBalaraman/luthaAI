@@ -1,8 +1,11 @@
 from fastapi import APIRouter, Depends, status, UploadFile, File, HTTPException
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm  # Add this import
 import os
 from typing import List
-from sqlalchemy.orm import Session
-from fastapi.security import OAuth2PasswordRequestForm
+import pdfplumber
+from docx import Document
+import shutil
+from sqlalchemy.orm import Session  # Add this import
 
 from backend.schemas import UserCreate, Token
 from backend.database import get_db
@@ -150,6 +153,72 @@ async def delete_chat(
     db.commit()
     return
 
+def convert_file_to_text(file_path: str, content_type: str) -> str:
+    """Convert uploaded file to text based on file type."""
+    try:
+        # Handle PDF files
+        if content_type == "application/pdf":
+            all_text = []
+            with pdfplumber.open(file_path) as pdf:
+                # Extract text from all pages
+                for page in pdf.pages:
+                    text = page.extract_text()
+                    if text:
+                        all_text.append(text)
+
+                # Extract tables from all pages
+                for i, page in enumerate(pdf.pages):
+                    tables = page.extract_tables()
+                    if tables:
+                        all_text.append(f"\n[TABLE FROM PAGE {i+1}]")
+                        for table in tables:
+                            all_text.extend("\t".join(str(cell) for cell in row if cell) for row in table)
+                
+                return "\n".join(all_text)
+        
+        # Handle DOCX files
+        elif content_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+            doc = Document(file_path)
+            full_text = []
+            
+            # Extract headers and footers
+            for section in doc.sections:
+                header = section.header
+                footer = section.footer
+                if header:
+                    full_text.append("[HEADER]")
+                    for para in header.paragraphs:
+                        full_text.append(para.text)
+                if footer:
+                    full_text.append("[FOOTER]")
+                    for para in footer.paragraphs:
+                        full_text.append(para.text)
+
+            # Extract paragraphs
+            full_text.append("[BODY]")
+            for para in doc.paragraphs:
+                full_text.append(para.text)
+
+            # Extract tables
+            for table in doc.tables:
+                full_text.append("[TABLE]")
+                for row in table.rows:
+                    row_data = [cell.text.strip() for cell in row.cells]
+                    full_text.append("\t".join(row_data))
+
+            return "\n".join(full_text)
+
+        # Handle TXT files
+        elif content_type == "text/plain":
+            with open(file_path, 'r', encoding='utf-8') as f:
+                return f.read()
+
+        else:
+            return f"Unsupported file type: {content_type}"
+
+    except Exception as e:
+        return f"Error converting file: {str(e)}"
+
 @router.post("/chat/{chat_id}/upload")
 async def upload_chat_file(
     chat_id: int,
@@ -163,12 +232,23 @@ async def upload_chat_file(
     if not chat:
         raise HTTPException(status_code=403, detail="Not authorized for this chat.")
 
-    # Create uploads directory if it doesn't exist (changed path here)
-    upload_dir = "uploads"  # Changed this line to use relative path
+    # Determine the actual content type from filename
+    file_ext = os.path.splitext(file.filename)[1].lower()
+    content_type_map = {
+        '.pdf': 'application/pdf',
+        '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        '.txt': 'text/plain'
+    }
+    content_type = content_type_map.get(file_ext)
+    
+    if not content_type:
+        raise HTTPException(status_code=422, detail=f"Unsupported file type: {file_ext}")
+
+    # Create uploads directory if it doesn't exist
+    upload_dir = "uploads"
     os.makedirs(upload_dir, exist_ok=True)
 
     # Create a unique filename
-    file_ext = os.path.splitext(file.filename)[1]
     unique_filename = f"chat_{chat_id}_{file.filename}"
     file_path = os.path.join(upload_dir, unique_filename)
 
@@ -177,6 +257,12 @@ async def upload_chat_file(
         contents = await file.read()
         with open(file_path, "wb") as f:
             f.write(contents)
+        
+        # Convert file to text and print
+        extracted_text = convert_file_to_text(file_path, content_type)
+        print(f"\n=== Extracted text from {file.filename} ===")
+        print(extracted_text)
+        print("=" * 50)
         
         # Create a message in the chat about the uploaded file
         file_message = Message(
@@ -189,4 +275,8 @@ async def upload_chat_file(
         
         return {"filename": unique_filename, "message": "File uploaded successfully"}
     except Exception as e:
+        if os.path.exists(file_path):
+            os.remove(file_path)
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        await file.close()
