@@ -283,7 +283,7 @@ async def upload_chat_file(
         # Convert file to text and print
         extracted_text = convert_file_to_text(file_path, content_type)
         print(f"\n=== Extracted text from {file.filename} ===")
-        print(extracted_text)
+        # print(extracted_text.split(100)[0])  # Print first 100 characters for brevity
         print("=" * 50)
         
         # Generate summary of the extracted text with error handling
@@ -293,6 +293,7 @@ async def upload_chat_file(
             else:
                 print(f"[DEBUG] Attempting to summarize text of length: {len(extracted_text)}")
                 summary = get_text_summary(extracted_text)
+                print(f"[DEBUG] Summary generated: {summary}")
                 if not summary:
                     summary = "Could not generate summary. The text might be too short or in an unsupported format."
         except Exception as e:
