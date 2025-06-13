@@ -111,7 +111,20 @@ def upload_file_to_chat(chat_id, file):
         st.error(f"Error uploading file: {e}")
         return False
 
+def restore_login_from_query_params():
+    # Restore access_token from query params if present and not in session_state
+    if "access_token" not in st.session_state:
+        token = st.query_params.get("access_token")
+        if token:
+            st.session_state.access_token = token
+            st.session_state.logged_in = True
+    # If access_token is present, ensure logged_in is set
+    if st.session_state.get("access_token"):
+        st.session_state.logged_in = True
+
 def render():
+    # Restore login state from query params if needed
+    restore_login_from_query_params()
     # --- Ensure user is logged in ---
     if not st.session_state.get("logged_in") or not st.session_state.get("access_token"):
         st.error("You must be logged in to access chats.")

@@ -5,7 +5,21 @@ from requests.exceptions import ConnectionError
 
 BACKEND_URL = "http://127.0.0.1:8000"
 
+def restore_login_from_query_params():
+    # Restore access_token from query params if present and not in session_state
+    if "access_token" not in st.session_state:
+        token = st.query_params.get("access_token")
+        if token:
+            st.session_state.access_token = token
+            st.session_state.logged_in = True
+    # If access_token is present, ensure logged_in is set
+    if st.session_state.get("access_token"):
+        st.session_state.logged_in = True
+
 def render():
+    # Restore login state from query params if needed
+    restore_login_from_query_params()
+
     # --- Login Page UI ---
     st.title("Welcome to LuthaMind AI")
     st.write("Please log in to continue.")
@@ -47,6 +61,8 @@ def render():
                     token_data = response.json()
                     st.session_state.access_token = token_data["access_token"]
                     st.session_state.logged_in = True 
+                    # Persist token in query params for refresh persistence
+                    st.query_params["access_token"] = st.session_state.access_token
                     print("[DEBUG] Login successful")
                     st.success("Login successful!")
                     st.rerun()
