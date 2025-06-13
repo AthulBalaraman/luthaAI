@@ -195,6 +195,13 @@ def render():
         if plus_clicked:
             st.session_state.show_upload_expander = True
 
+    if st.session_state.get("show_upload_expander"):
+        with st.expander("Upload Documents"):
+            uploaded_files = st.file_uploader("Choose a file", accept_multiple_files=True)
+            if uploaded_files:
+                for uploaded_file in uploaded_files:
+                    print(f"Uploaded file: {uploaded_file.name}")
+
     # --- Handle message sending and streaming ---
     if chat_prompt and st.session_state.active_chat_id and st.session_state.active_chat_id in chat_ids:
         # Save user message to backend immediately
