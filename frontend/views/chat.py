@@ -227,7 +227,7 @@ def render():
             st.session_state.show_upload_expander = True
 
     if st.session_state.get("show_upload_expander"):
-        with st.expander("Upload Documents"):
+        with st.expander("Upload Documents to summarize"):
             uploaded_files = st.file_uploader("Choose a file", accept_multiple_files=True)
             col1, col2 = st.columns([6,1])
             with col2:
