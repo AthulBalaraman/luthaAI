@@ -58,12 +58,13 @@ def semantic_chunk_and_summarize(text, summarizer, chunk_size=500, max_length=50
     
     # Join all chunk summaries
     combined_summary = " ".join(summaries)
+    print(combined_summary)
     print(f"[DEBUG] Combined summary length: {len(combined_summary)}")
     
-    # If the combined summary is still too long, recursively summarize it
-    if len(combined_summary) > chunk_size:
-        print("[DEBUG] Combined summary still too long, recursively summarizing...")
-        return semantic_chunk_and_summarize(combined_summary, summarizer, chunk_size, max_length, min_length)
+    # # If the combined summary is still too long, recursively summarize it
+    # if len(combined_summary) > chunk_size:
+    #     print("[DEBUG] Combined summary still too long, recursively summarizing...")
+    #     return semantic_chunk_and_summarize(combined_summary, summarizer, chunk_size, max_length, min_length)
     
     print("[DEBUG] Final summary created")
     return combined_summary
