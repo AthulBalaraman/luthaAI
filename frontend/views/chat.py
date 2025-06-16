@@ -105,11 +105,11 @@ def upload_file_to_chat(chat_id, file):
         if response.status_code == 200:
             # The backend now handles adding both the file upload message
             # and the summary message to the chat history
-            return True
-        return False
+            return True, response.json().get("summary", "")
+        return False, None
     except Exception as e:
         st.error(f"Error uploading file: {e}")
-        return False
+        return False, None
 
 def restore_login_from_query_params():
     # Restore access_token from query params if present and not in session_state
@@ -230,14 +230,37 @@ def render():
         with st.expander("Upload Documents to summarize"):
             uploaded_files = st.file_uploader("Choose a file", accept_multiple_files=True)
             col1, col2 = st.columns([6,1])
+            
+            # Initialize file_uploading state if not exists
+            if "file_uploading" not in st.session_state:
+                st.session_state.file_uploading = False
+                
+            with col1:
+                # Show spinner during upload
+                if st.session_state.file_uploading:
+                    with st.spinner("Uploading and processing file(s). This may take a moment..."):
+                        st.info("Please wait while we process your document and generate a summary.")
+            
             with col2:
-                if st.button("Upload", disabled=not uploaded_files):
-                    for uploaded_file in uploaded_files:
-                        if upload_file_to_chat(st.session_state.active_chat_id, uploaded_file):
-                            st.success(f"Uploaded {uploaded_file.name}")
-                        else:
-                            st.error(f"Failed to upload {uploaded_file.name}")
-                    st.session_state.show_upload_expander = False
+                upload_button = st.button("Upload", disabled=not uploaded_files or st.session_state.file_uploading)
+                if upload_button:
+                    st.session_state.file_uploading = True
+                    st.rerun()  # Rerun to show the spinner immediately
+            
+            # Handle upload after rerun with spinner visible
+            if st.session_state.file_uploading and uploaded_files:
+                success_count = 0
+                for uploaded_file in uploaded_files:
+                    success, summary = upload_file_to_chat(st.session_state.active_chat_id, uploaded_file)
+                    if success:
+                        success_count += 1
+                
+                # Reset states after upload completes
+                st.session_state.file_uploading = False
+                st.session_state.show_upload_expander = False
+                
+                if success_count > 0:
+                    # Force a rerun to refresh the chat with new messages
                     st.rerun()
     
     # --- Handle message sending and streaming ---
