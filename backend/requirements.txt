@@ -15,3 +15,6 @@ python-multipart
 pymysql
 transformers
 torch
+chonkie
+chonkie[all]
+chonkie[semantic]
